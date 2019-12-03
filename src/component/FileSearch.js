@@ -14,6 +14,7 @@ const FileSearch = ({ title, onFileSearch }) => {
   const closeSearch = () => {
     setInputActive(false)
     setValue('')
+    onFileSearch('')
   }
   useEffect(() => {
     if (enterPressed && inputActive) {
@@ -22,19 +23,6 @@ const FileSearch = ({ title, onFileSearch }) => {
     if (escPressed && inputActive) {
       closeSearch()
     }
-    // const handleInputEvent = (event) => {
-    //   const { keyCode } = event
-    //   if (keyCode === 13 && inputActive) {
-    //     onFileSearch(value)
-    //   }
-    //   else if (keyCode === 27 && inputActive) {
-    //     closeSearch(event)
-    //   }
-    // }
-    // document.addEventListener('keyup', handleInputEvent)
-    // return () => {
-    //   document.removeEventListener('keyup', handleInputEvent)
-    // }
   })
   useEffect(() => {
     if (inputActive) {
