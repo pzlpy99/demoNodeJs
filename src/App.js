@@ -5,25 +5,55 @@ import FileSearch from './component/FileSearch'
 import FileList from './component/FileList'
 import defaultFiles from './utils/defaultFiles'
 import BottomBtn from './component/BottomBtn'
-import { faPlus, faFileImport } from '@fortawesome/free-solid-svg-icons'
+import { faPlus, faFileImport, faSave, faMarsStroke, faRulerHorizontal } from '@fortawesome/free-solid-svg-icons'
 import TabList from './component/TabList'
 import SimpleMDE from "react-simplemde-editor"
 import "easymde/dist/easymde.min.css"
 import uuidv4 from 'uuid/v4'
+import { flattenArr, objToArr } from './utils/helper'
+import fileHelper from './utils/fileHelper'
 
+const { join, basename, extname, dirname } = window.require('path')
+const { remote } = window.require('electron')
+const Store = window.require('electron-store')
+const fileStore = new Store({ 'name': 'Files Data' })
+
+const saveFilesToStore = (files) => {
+  const filesStoreObj = objToArr(files).reduce((result, file) => {
+    const { id, path, title, createdAt } = file
+    result[id] = {
+      id,
+      path,
+      title,
+      createdAt,
+    }
+    return result
+  }, {})
+  fileStore.set('files', filesStoreObj)
+}
 function App () {
-  const [files, setFiles] = useState(defaultFiles)
+  const [files, setFiles] = useState(fileStore.get('files') || {})
   const [activeFileID, setActiveFileID] = useState('')
   const [openedFileIDs, setOpenedFileIDs] = useState([])
   const [unsavedFileIDs, setUnsavedFileIDs] = useState([])
   const [searchedFiles, setSearchedFiles] = useState([])
-  const fileListArr = (searchedFiles.length > 0) ? searchedFiles : files
+  const filesArr = objToArr(files)
+  const savedLocation = remote.app.getPath('documents')
+
   const openedFiles = openedFileIDs.map(openID => {
-    return files.find(file => file.id === openID)
+    return files[openID]
   })
-  const activeFile = files.find(file => file.id === activeFileID)
+  const fileListArr = (searchedFiles.length > 0) ? searchedFiles : filesArr
+  const activeFile = files[activeFileID]
   const fileClick = (fileID) => {
     setActiveFileID(fileID)
+    const currentFile = files[fileID]
+    if (!currentFile.isLoaded) {
+      fileHelper.readFile(currentFile.path).then(value => {
+        const newFile = { ...files[fileID], body: value, isLoaded: true }
+        setFiles({ ...files, [fileID]: newFile })
+      })
+    }
     if (!openedFileIDs.includes(fileID)) {
       setOpenedFileIDs([...openedFileIDs, fileID])
     }
@@ -41,49 +71,98 @@ function App () {
     }
   }
   const fileChange = (id, value) => {
-    const newFiles = files.map(file => {
-      if (file.id === id) {
-        file.body = value
-      }
-      return file
-    })
-    setFiles(newFiles)
+    const newFile = { ...files[id], body: value }
+    setFiles({ ...files, [id]: newFile })
     if (!unsavedFileIDs.includes(id)) {
       setUnsavedFileIDs([...unsavedFileIDs, id])
     }
   }
   const deleteFile = (id) => {
-    const newFiles = files.filter(file => file.id !== id)
-    setFiles(newFiles)
-    tabClose(id)
+    if (files[id].isNew) {
+      const { [id]: value, ...afterDelete } = files
+      setFiles(afterDelete)
+    } else {
+      fileHelper.deleteFile(files[id].path).then(() => {
+        const { [id]: value, ...afterDelete } = files
+        setFiles(afterDelete)
+        saveFilesToStore(afterDelete)
+        tabClose(id)
+      })
+    }
   }
-  const updateFileName = (id, title) => {
-    const newFiles = files.map(file => {
-      if (file.id === id) {
-        file.title = title
-        file.isNew = false
-      }
-      return file
-    })
-    setFiles(newFiles)
+  const updateFileName = (id, title, isNew) => {
+    const newPath = isNew ? join(savedLocation, `${title}.md`) : join(dirname(files[id].path), `${title}.md`)
+    const modifiedFile = { ...files[id], title, isNew: false, path: newPath }
+    const newFiles = { ...files, [id]: modifiedFile }
+    if (isNew) {
+      fileHelper.writeFile(newPath, files[id].body).then(() => {
+        setFiles(newFiles)
+        saveFilesToStore(newFiles)
+      })
+    } else {
+      const oldPath = files[id].path
+      fileHelper.renameFile(oldPath, newPath).then(() => {
+        setFiles(newFiles)
+        saveFilesToStore(newFiles)
+      })
+    }
   }
   const fileSearch = (keyword) => {
-    const newFiles = files.filter(file => file.title.includes(keyword))
+    const newFiles = filesArr.filter(file => file.title.includes(keyword))
     setSearchedFiles(newFiles)
   }
   const createNewFile = () => {
     const newID = uuidv4()
-    const newFiles = [
-      ...files,
-      {
-        id: newID,
-        title: '',
-        body: '##请输入',
-        createAt: new Date().getTime(),
-        isNew: true,
+    const newFile = {
+      id: newID,
+      title: '',
+      body: '##请输入内容',
+      createAt: new Date().getTime(),
+      isNew: true,
+    }
+    setFiles({ ...files, [newID]: newFile })
+  }
+  const saveCurrentFile = () => {
+    fileHelper.writeFile(activeFile.path, activeFile.body).then(() => {
+      setUnsavedFileIDs(unsavedFileIDs.filter(id => id !== activeFile.id))
+    })
+  }
+  const importFiles = () => {
+    remote.dialog.showOpenDialog({
+      title: '选择导入的文件',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Markdown files', extensions: ['md'] }
+      ]
+    }, (paths) => {
+      if (Array.isArray(paths)) {
+        const filteredPaths = paths.filter(path => {
+          const alreadyAdded = Object.values(files).find(file => {
+            return file.path === path
+          })
+          return !alreadyAdded
+        })
+        const importFilesArr = filteredPaths.map(path => {
+          return {
+            id: uuidv4(),
+            title: basename(path, extname(path)),
+            path,
+          }
+        })
+        // console.log(importFilesArr)
+        const newFiles = { ...files, ...flattenArr(importFilesArr) }
+        // console.log(newFiles)
+        setFiles(newFiles)
+        saveFilesToStore(newFiles)
+        if (importFilesArr.length > 0) {
+          remote.dialog.showMessageBox({
+            type: 'info',
+            title: `成功导入了${importFilesArr.length}个文件`,
+            message: `成功导入了${importFilesArr.length}个文件`,
+          })
+        }
       }
-    ]
-    setFiles(newFiles)
+    })
   }
   return (
     <div className="App container-fluid px-0">
@@ -112,6 +191,7 @@ function App () {
                 text="导入"
                 colorClass="btn-success"
                 icon={faFileImport}
+                onBtnClick={importFiles}
               />
             </div>
           </div>
@@ -138,9 +218,13 @@ function App () {
                 options={{
                   minHeight: '515px',
                 }}
-              >
-
-              </SimpleMDE>
+              />
+              <BottomBtn
+                text="保存"
+                colorClass="btn-success"
+                icon={faSave}
+                onBtnClick={saveCurrentFile}
+              />
             </>
           }
         </div>
