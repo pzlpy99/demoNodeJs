@@ -3,18 +3,18 @@ import './App.css';
 import 'bootstrap/dist/css/bootstrap.min.css'
 import FileSearch from './component/FileSearch'
 import FileList from './component/FileList'
-import defaultFiles from './utils/defaultFiles'
 import BottomBtn from './component/BottomBtn'
-import { faPlus, faFileImport, faSave, faMarsStroke, faRulerHorizontal } from '@fortawesome/free-solid-svg-icons'
+import { faPlus, faFileImport, faSave } from '@fortawesome/free-solid-svg-icons'
 import TabList from './component/TabList'
 import SimpleMDE from "react-simplemde-editor"
 import "easymde/dist/easymde.min.css"
 import uuidv4 from 'uuid/v4'
 import { flattenArr, objToArr } from './utils/helper'
 import fileHelper from './utils/fileHelper'
+import useIpcRenderer from './hooks/useIpcRenderer'
 
 const { join, basename, extname, dirname } = window.require('path')
-const { remote } = window.require('electron')
+const { remote, ipcRenderer } = window.require('electron')
 const Store = window.require('electron-store')
 const fileStore = new Store({ 'name': 'Files Data' })
 
@@ -71,10 +71,12 @@ function App () {
     }
   }
   const fileChange = (id, value) => {
-    const newFile = { ...files[id], body: value }
-    setFiles({ ...files, [id]: newFile })
-    if (!unsavedFileIDs.includes(id)) {
-      setUnsavedFileIDs([...unsavedFileIDs, id])
+    if (value !== files[id].body) {
+      const newFile = { ...files[id], body: value }
+      setFiles({ ...files, [id]: newFile })
+      if (!unsavedFileIDs.includes(id)) {
+        setUnsavedFileIDs([...unsavedFileIDs, id])
+      }
     }
   }
   const deleteFile = (id) => {
@@ -123,9 +125,11 @@ function App () {
     setFiles({ ...files, [newID]: newFile })
   }
   const saveCurrentFile = () => {
-    fileHelper.writeFile(activeFile.path, activeFile.body).then(() => {
-      setUnsavedFileIDs(unsavedFileIDs.filter(id => id !== activeFile.id))
-    })
+    if (activeFile) {
+      fileHelper.writeFile(activeFile.path, activeFile.body).then(() => {
+        setUnsavedFileIDs(unsavedFileIDs.filter(id => id !== activeFile.id))
+      })
+    }
   }
   const importFiles = () => {
     remote.dialog.showOpenDialog({
@@ -164,6 +168,11 @@ function App () {
       }
     })
   }
+  useIpcRenderer({
+    'create-new-file': createNewFile,
+    'import-file': importFiles,
+    'save-edit-file': saveCurrentFile,
+  })
   return (
     <div className="App container-fluid px-0">
       <div className="row no-gutters">
@@ -218,12 +227,6 @@ function App () {
                 options={{
                   minHeight: '515px',
                 }}
-              />
-              <BottomBtn
-                text="保存"
-                colorClass="btn-success"
-                icon={faSave}
-                onBtnClick={saveCurrentFile}
               />
             </>
           }
