@@ -26,6 +26,7 @@ app.on("ready", () => {
       "./settings/settings.html"
     )}`;
     settingsWindow = new AppWindow(settingsWindowConfig, settingsFileLocation);
+    settingsWindow.removeMenu()
     settingsWindow.on("closed", () => {
       settingsWindow = null;
     });
