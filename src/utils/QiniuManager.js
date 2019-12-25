@@ -6,9 +6,11 @@ class QiniuManager {
     this.mac = new qiniu.auth.digest.Mac(accessKey, secretKey);
     this.bucket = bucket
     this.config = new qiniu.conf.Config();
+    this.config.zone = qiniu.zone.Zone_z0
     this.bucketManager = new qiniu.rs.BucketManager(this.mac, this.config);
 
   }
+
   uploadFile (key, localFilePath) {
     const options = {
       scope: this.bucket + ":" + key,
