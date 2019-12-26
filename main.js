@@ -6,6 +6,7 @@ const AppWindow = require("./src/AppWindow");
 const Store = require("electron-store");
 const settingsStore = new Store({ name: "Settings" });
 const QiniuManager = require('./src/utils/QiniuManager')
+const fileStore = new Store({ name: 'Files Data' })
 
 let mainWindow, settingsWindow;
 const createManager = () => {
@@ -52,6 +53,53 @@ app.on("ready", () => {
       mainWindow.webContents.send('active-file-uploaded')
     }).catch(() => {
       dialog.showErrorBox('同步失败', '请检查七牛云参数')
+    })
+  })
+  ipcMain.on("download-file", (event, data) => {
+    const manager = createManager()
+    const filesObj = fileStore.get('files')
+    const { key, path, id } = data
+    manager.getStat(data.key).then((resp) => {
+      const serverUpdatedTime = Math.round(resp.putTime / 10000)
+      console.log('qiniu', serverUpdatedTime)
+      const localUpdatedTime = filesObj[id].updateAt
+      console.log('local', localUpdatedTime)
+      if (serverUpdatedTime > localUpdatedTime || !localUpdatedTime) {
+        console.log('new file downloaded')
+        manager.downloadFile(key, path).then(() => {
+          mainWindow.webContents.send('file-downloaded', { status: 'download-success', id })
+        })
+      } else {
+        console.log('no new file')
+        mainWindow.webContents.send('file-downloaded', { status: 'no-new-file', id })
+      }
+    }, (error) => {
+      console.log(error)
+      if (error.statusCode === 612) {
+        mainWindow.webContents.send('file-downloaded', { status: 'no-file' })
+      }
+    })
+  })
+  ipcMain.on('upload-all-to-qiniu', () => {
+    mainWindow.webContents.send('loading-status', true)
+    const manager = createManager()
+    const filesObj = fileStore.get('files') || {}
+    const uploadPromiseArr = Object.keys(filesObj).map(key => {
+      const file = filesObj[key]
+      return manager.uploadFile(`${file.title}.md`, file.path)
+    })
+    Promise.all(uploadPromiseArr).then(result => {
+      console.log(result)
+      dialog.showMessageBox({
+        type: 'info',
+        title: `成功上传了${result.length}个文件`,
+        message: `成功上传了${result.length}个文件`
+      })
+      mainWindow.webContents.send('files-uploaded')
+    }).catch(() => {
+      dialog.showMessageBox('同步失败', '请检查七牛云参数是否正确')
+    }).finally(() => {
+      mainWindow.webContents.send('loading-status', false)
     })
   })
   ipcMain.on("config-is-saved", () => {
